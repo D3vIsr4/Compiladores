@@ -1,0 +1,279 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <cctype>
+#include <iomanip>
+
+using namespace std;
+
+// ==========================================
+// Estructuras del analizador lexico
+// ==========================================
+enum TokenType { 
+    KEYWORD,    
+    IDENTIFIER, 
+    DIGIT,      
+    UNKNOWN 
+};
+
+struct Token {
+    TokenType type;
+    string value;
+};
+
+class LexicalAnalyzer {
+public:
+    vector<Token> tokenize(const string& instruction) {
+        vector<Token> tokens;
+        string currentWord = "";
+
+        for (size_t i = 0; i < instruction.length(); ++i) {
+            char c = instruction[i];
+            if (c == ' ' || c == ',' || c == ';') {
+                if (!currentWord.empty()) {
+                    tokens.push_back(classifyToken(currentWord));
+                    currentWord = ""; 
+                }
+            } else {
+                currentWord += toupper(c); //convertimos a mayusculas para estandarizar
+            }
+        }
+
+        if (!currentWord.empty()) {
+            tokens.push_back(classifyToken(currentWord));
+        }
+        return tokens;
+    }
+
+private:
+    Token classifyToken(const string& word) {
+        if (word == "START" || word == "STOP" || word == "MOV" || 
+            word == "ADD" || word == "SUSTR" || word == "DIV" || 
+            word == "MULT" || word == "STO") {
+            return {KEYWORD, word};
+        }
+        else if (word == "AL" || word == "AH" || word == "BL" || word == "BH" ||
+                 word == "PC" || word == "IR" || word == "ACC" || word == "MAR" || word == "MBR") {
+            return {IDENTIFIER, word};
+        }
+        else if (isNumber(word)) {
+            return {DIGIT, word};
+        }
+        return {UNKNOWN, word};
+    }
+
+    bool isNumber(const string& s) {
+        for (char const &ch : s) {
+            if (std::isdigit(ch) == 0) return false;
+        }
+        return true;
+    }
+};
+
+// ==========================================
+// Estructura de la instruccion
+// ==========================================
+class Instruction {
+public:
+    string nombre;
+    vector<string> argumentos;
+    string interpretacion;
+    int longitud;
+
+    // Constructor por defecto
+    Instruction() : nombre(""), interpretacion(""), longitud(0) {}
+
+    Instruction(string n, vector<string> args, string interp) {
+        nombre = n;
+        argumentos = args;
+        interpretacion = interp;
+        longitud = args.size();
+    }
+};
+
+// ==========================================
+// Virtual Machine (ciclo de maquina)
+// ==========================================
+class VirtualMachine {
+private:
+    void limpiarPantalla() {
+        #ifdef _WIN32
+            system("cls");
+
+        #endif
+    }    
+private:
+    // Registros
+    int PC = 0;
+    string IR = "";
+    int ACC = 0, MAR = 0, MBR = 0;
+    int AL = 0, AH = 0, BL = 0, BH = 0;
+
+    // Memoria y Estado
+    vector<string> programMemory;
+    int dataMemory[256] = {0}; 
+    bool isRunning = false;
+    Instruction currentInstruction;
+
+    //Contador de ciclos
+    int contador_Ciclos = 1;
+
+    // Helper para obtener la referencia a un registro
+    int* getRegister(const string& regName) {
+        if (regName == "AL") return &AL;
+        if (regName == "AH") return &AH;
+        if (regName == "BL") return &BL;
+        if (regName == "BH") return &BH;
+        if (regName == "ACC") return &ACC;
+        if (regName == "PC") return &PC;
+        if (regName == "MAR") return &MAR;
+        if (regName == "MBR") return &MBR;
+        return nullptr; 
+    }
+
+    void printState(const string& stateName) {
+        cout << "==================================================" << endl;
+        cout << "\n\t\t[Ciclo #" << contador_Ciclos << "]\n " << endl;
+        cout << "==================================================" << endl;
+        cout << "[Estado del Ciclo Maquina]: " << stateName << endl;
+        cout << "--------------------------------------------------" << endl;
+        cout << "-> Registros de Proposito Especifico:" << endl;
+        cout << "   PC  : " << setw(4) << PC   << " | IR  : " << IR << endl;
+        cout << "   MAR : " << setw(4) << MAR  << " | MBR : " << setw(4) << MBR << endl;
+        cout << "   ACC : " << setw(4) << ACC  << " (Ultimo resultado aritmetico)" << endl; 
+        cout << "--------------------------------------------------" << endl;
+        cout << "-> Registros de Proposito General:" << endl;
+        cout << "   AL  : " << setw(4) << AL   << " | AH  : " << setw(4) << AH << endl;
+        cout << "   BL  : " << setw(4) << BL   << " | BH  : " << setw(4) << BH << endl;
+        cout << "==================================================\n" << endl;
+    }
+
+public:
+    void loadProgram(const vector<string>& program) {
+        programMemory = program;
+        PC = 0; 
+        cout << "--- Programa cargado ---" << endl;
+    }
+
+    // Nuevo método para pausar la ejecución
+    void pausarPaso() {
+        cout << "Presiona ENTER para continuar..." << flush;
+        cin.get(); // Espera a que el usuario presione Enter
+    }
+
+    void start() {
+        isRunning = true;
+        
+        // Limpiamos cualquier salto de línea residual en el buffer de entrada antes de empezar
+        cin.ignore(256, '\n'); 
+
+        while (isRunning && PC < programMemory.size()) {
+            fetch();
+            if(!isRunning) break; 
+            pausarPaso(); // Pausa después de FETCH
+            
+            decode();
+            pausarPaso(); // Pausa después de DECODE
+            
+            execute();
+            
+            // Espacio más grande visual para separar cada ciclo de instrucción completado
+            cout << "\n\n";
+            cout << "**************************************************" << endl;
+            cout << "       Fin del ciclo" << endl;
+            cout << "**************************************************" << endl;
+            cout << "\n\n\n";
+            
+            // Pausa final antes de pasar a la siguiente instrucción (si el programa no ha hecho STOP)
+            if (isRunning) {
+                pausarPaso(); 
+                limpiarPantalla();
+                contador_Ciclos++;
+            }
+        }
+    }
+
+private:
+    void fetch() {
+        MAR = PC;
+        // Simulamos traer la instrucción de la memoria de programa
+        IR = programMemory[MAR]; 
+        PC++; 
+        printState("FETCH");
+    }
+
+    void decode() {
+        LexicalAnalyzer lexer;
+        vector<Token> tokens = lexer.tokenize(IR);
+        
+        string nombreInstruccion = "";
+        vector<string> argumentosInstruccion;
+
+        for (const auto& token : tokens) {
+            if (token.type == KEYWORD) {
+                nombreInstruccion = token.value;
+            } else if (token.type == IDENTIFIER || token.type == DIGIT) {
+                argumentosInstruccion.push_back(token.value);
+            }
+        }
+
+        currentInstruction = Instruction(nombreInstruccion, argumentosInstruccion, "Decodificada");
+        printState("DECODE");
+    }
+
+    void execute() {
+        string op = currentInstruction.nombre;
+        vector<string> args = currentInstruction.argumentos;
+
+        if (op == "START") {
+            // No action needed other than state print
+        } 
+        else if (op == "STOP") {
+            isRunning = false;
+        } 
+        else if (op == "MOV") {
+            int* regDestino = getRegister(args[0]);
+            if (regDestino != nullptr && args.size() > 1) {
+                *regDestino = stoi(args[1]); // Direccionamiento Inmediato
+            }
+        } 
+        else if (op == "ADD") {
+            int* reg1 = getRegister(args[0]);
+            int* reg2 = getRegister(args[1]);
+            if (reg1 != nullptr && reg2 != nullptr) {
+                ACC = *reg1 + *reg2;
+            }
+        } 
+        else if (op == "STO") {
+            int direccion = stoi(args[0]);
+            MAR = direccion;
+            MBR = ACC;
+            dataMemory[MAR] = MBR; 
+            cout << ">>> Memoria RAM en direccion [" << MAR << "] actualizada con el valor: " << dataMemory[MAR] << " <<<" << endl;
+        }
+
+        printState("EXECUTE");
+    }
+};
+
+// ==========================================
+// Funcion principal (Cargador y Ejecución)
+// ==========================================
+int main() {
+    VirtualMachine vm;
+
+    // Programa basado en el diagrama de memoria de las diapositivas
+    vector<string> programa = {
+        "START;",
+        "MOV AL, 6;",
+        "MOV BL, 7;",
+        "ADD AL, BL;",
+        "STO 8;",
+        "STOP;"
+    };
+
+    vm.loadProgram(programa);
+    vm.start();
+
+    return 0;
+}
